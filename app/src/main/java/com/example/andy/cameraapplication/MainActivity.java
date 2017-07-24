@@ -6,11 +6,9 @@ import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
-import android.graphics.ColorFilter;
 import android.graphics.Paint;
 import android.graphics.PorterDuff;
 import android.graphics.PorterDuffXfermode;
-import android.graphics.drawable.Drawable;
 import android.hardware.camera2.CameraAccessException;
 import android.hardware.camera2.CameraCaptureSession;
 import android.hardware.camera2.CameraCharacteristics;
@@ -19,21 +17,18 @@ import android.hardware.camera2.CameraManager;
 import android.hardware.camera2.CameraMetadata;
 import android.hardware.camera2.CaptureRequest;
 import android.hardware.camera2.params.StreamConfigurationMap;
-import android.media.Image;
+import android.media.ThumbnailUtils;
 import android.os.Bundle;
 import android.os.Handler;
-import android.os.HandlerThread;
 import android.os.Looper;
 import android.os.Message;
-import android.support.annotation.IntRange;
+import android.os.SystemClock;
 import android.support.annotation.NonNull;
-import android.support.annotation.Nullable;
 import android.support.constraint.ConstraintLayout;
 import android.support.design.widget.FloatingActionButton;
 import android.support.design.widget.Snackbar;
 import android.support.v4.app.ActivityCompat;
 import android.support.v7.app.AppCompatActivity;
-import android.support.v7.widget.Toolbar;
 import android.util.Log;
 import android.util.Size;
 import android.view.Surface;
@@ -42,16 +37,17 @@ import android.view.View;
 import android.view.Menu;
 import android.view.MenuItem;
 import android.graphics.SurfaceTexture;
-import android.view.Window;
 import android.widget.ImageView;
 
 import java.util.Arrays;
+import java.util.List;
 
 public class MainActivity extends AppCompatActivity {
     private static final String TAG = "UpYourVeggies";
     private static final int REQUEST_CAMERA_PERMISSION = 200;
-    private static final int BITMAP_READY = 42;
-    private static final int UPDATE_VIEW = 45;
+    private static final int RESULT_READY = 42;
+    private static final int PREVIEW_READY = 43;
+    private static final int RESET_VIEW = 45;
     private TextureView previewiew;
     private ImageView overlay;
     private String cameraId;
@@ -60,22 +56,39 @@ public class MainActivity extends AppCompatActivity {
     protected CaptureRequest captureRequest;
     protected CaptureRequest.Builder captureRequestBuilder;
     private Size imageDimension;
+
+    private Classifier classifier;
+    private static final int INPUT_SIZE = 299;
+    private static final int IMAGE_MEAN = 128;
+    private static final float IMAGE_STD = 128;
+    private static final String INPUT_NAME = "Mul";
+    private static final String OUTPUT_NAME = "final_result";
+
+    private static final String MODEL_FILE =
+            "file:///android_asset/another_retrained_graph_optimized.pb";
+    private static final String LABEL_FILE =
+            "file:///android_asset/another_retrained_labels.txt";
+
+
     private Handler mBackgroundHandler;
     private Handler imageUpdateHandler = new Handler(Looper.getMainLooper()){
 
         @Override
         public void handleMessage(Message inputMessage) {
-            if(inputMessage.what==BITMAP_READY){
+            if(inputMessage.what==RESULT_READY){
                 final int displaytime = 1000*10;
                 ImageProcessor ipr = (ImageProcessor) inputMessage.obj;
-                overlay.setImageBitmap(ipr.getBitmap());
-                overlay.setAlpha(1.0f);
-                Message m = imageUpdateHandler.obtainMessage(UPDATE_VIEW);
+                Message m = imageUpdateHandler.obtainMessage(RESET_VIEW);
                 imageUpdateHandler.sendMessageDelayed(m, displaytime);
                 Snackbar.make(ipr.getView(), ipr.getMessageText(), Snackbar.LENGTH_LONG).setDuration(displaytime)
                         .setAction("Action", null).show();
-            } else if(inputMessage.what==UPDATE_VIEW){
+            } else if(inputMessage.what==RESET_VIEW){
                 createOverlay();
+            } else if(inputMessage.what==PREVIEW_READY){
+                // show image
+                ImageProcessor ipr = (ImageProcessor) inputMessage.obj;
+                overlay.setImageBitmap(ipr.getBitmap());
+                overlay.setAlpha(1.0f);
             }
         }
 
@@ -95,47 +108,30 @@ public class MainActivity extends AppCompatActivity {
         public void run(){
 
             if(null == previewiew) return;
-            b = previewiew.getBitmap();
-            int w = b.getWidth();
-            int h = b.getHeight();
-            int cx = w/2;
-            int cy = h/2;
-            int radius = Math.min(cx,cy);
-            int rsq = radius*radius;
+            int w = previewiew.getBitmap().getWidth();
+            int h = previewiew.getBitmap().getHeight();
+            int se = Math.min(w,h);
+            Bitmap tmp = Bitmap.createBitmap(previewiew.getBitmap(),(w-se)/2,(h-se)/2,se,se);
+            b = ThumbnailUtils.extractThumbnail(tmp, INPUT_SIZE, INPUT_SIZE);
 
-            // THIS IS SUPER INEFFICIENT
-            // will be replaced in later version
-            int gmin = 10;
-            int greens = 0;
-            int total = 0;
-            for(int i = 0; i<w; i++){
-                for (int j = 0; j<h; j++) {
-                    int color = b.getPixel(i, j);
-                    int r2y = (j - cy) * (j - cy);
-                    int r2 = r2y + (i - cx) * (i - cx);
-                    int green = Color.green(color);
-                    int red = Color.red(color);
-                    int blue = Color.blue(color);
-                    if (r2 < rsq) { // inner cirlce
-                        total++;
-
-                        // Green? Min brightness and minimum gap (1/16 = 6.25%) of G above B and R
-                        int ggap = green -  green/16;
-                        if (green > gmin && ggap > red && ggap > blue){
-                            greens++;
-                        } else {
-                            int gray = (red*77 + green*151 + blue*28)/256;
-                            b.setPixel(i, j, Color.rgb(gray, gray, gray));
-                        }
-                    } else {
-                        int darkgray = (red*77 + green*151 + blue*28)/256/2;
-                        b.setPixel(i, j, Color.rgb(darkgray, darkgray, darkgray));
-                    }
-                }
+            // show image taken
+            if(message!=null){
+                Message m = new Message();
+                m.copyFrom(message);
+                m.what = PREVIEW_READY;
+                imageUpdateHandler.sendMessage(m);
             }
 
-            int greenpercent = (int)(100*(greens*1.0f/total));
-            result = greenpercent+"% of pixels are green";
+            final long startTime = SystemClock.uptimeMillis();
+            final List<Classifier.Recognition> results = classifier.recognizeImage(b);
+            final long lastProcessingTimeMs = SystemClock.uptimeMillis() - startTime;
+
+            //cropCopyBitmap = Bitmap.createBitmap(croppedBitmap);
+            String resultstring = "";
+            for (Classifier.Recognition res : results){
+                resultstring += res.toString() + "\n";
+            }
+            result = resultstring;
 
             if(message!=null){
                 imageUpdateHandler.sendMessage(message);
@@ -157,7 +153,7 @@ public class MainActivity extends AppCompatActivity {
             public void onClick(View view) {
 
                 ImageProcessor ipr = new ImageProcessor();
-                Message m = imageUpdateHandler.obtainMessage(BITMAP_READY,ipr);
+                Message m = imageUpdateHandler.obtainMessage(RESULT_READY,ipr);
                 ipr.setMessage(m);
                 ipr.setView(view);
                 Thread t = new Thread(ipr);
@@ -172,6 +168,17 @@ public class MainActivity extends AppCompatActivity {
         assert previewiew != null;
         previewiew.setSurfaceTextureListener(previewListener);
 
+
+        classifier =
+                TensorFlowImageClassifier.create(
+                        getAssets(),
+                        MODEL_FILE,
+                        LABEL_FILE,
+                        INPUT_SIZE,
+                        IMAGE_MEAN,
+                        IMAGE_STD,
+                        INPUT_NAME,
+                        OUTPUT_NAME);
     }
 
     private TextureView.SurfaceTextureListener previewListener = new TextureView.SurfaceTextureListener(){
