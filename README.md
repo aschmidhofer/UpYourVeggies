@@ -1,7 +1,7 @@
 # UpYourVeggies
 This is an Android app showcasing image classification using TensorFlow.
 
-It is inspired by TF Classify app by TensorFlow https://github.com/tensorflow/tensorflow/tree/master/tensorflow/examples/android
+It is based on TF Classify app by TensorFlow https://github.com/tensorflow/tensorflow/tree/master/tensorflow/examples/android
 
 ## The current model
 The model provided was trained on the Food-11 dataset from http://mmspg.epfl.ch/food-image-datasets
