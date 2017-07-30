@@ -1,0 +1,11 @@
+bread
+meat
+eggs
+soup
+fruit&veg
+noodles
+dairy
+fried
+seafood
+rice
+dessert

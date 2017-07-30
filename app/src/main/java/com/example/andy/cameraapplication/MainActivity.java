@@ -65,9 +65,9 @@ public class MainActivity extends AppCompatActivity {
     private static final String OUTPUT_NAME = "final_result";
 
     private static final String MODEL_FILE =
-            "file:///android_asset/another_retrained_graph_optimized.pb";
+            "file:///android_asset/optimized_mine_vH_0p15_dynamic.pb";
     private static final String LABEL_FILE =
-            "file:///android_asset/another_retrained_labels.txt";
+            "file:///android_asset/hr_mine_vH_0p15_dynamic.txt";
 
 
     private Handler mBackgroundHandler;
